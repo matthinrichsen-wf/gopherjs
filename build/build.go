@@ -475,6 +475,7 @@ func (s *Session) BuildFiles(filenames []string, pkgObj string, packagePath stri
 	if err != nil {
 		return err
 	}
+
 	if s.Types["main"].Name() != "main" {
 		return fmt.Errorf("cannot build/run non-main package")
 	}
@@ -542,7 +543,8 @@ func (s *Session) BuildPackage(pkg *PackageData) (*compiler.Archive, error) {
 			if importedPkgPath == "unsafe" || ignored {
 				continue
 			}
-			importedPkg, _, err := s.buildImportPathWithSrcDir(importedPkgPath, pkg.Dir)
+
+			pkg, _, err := s.buildImportPathWithSrcDir(importedPkgPath, pkg.Dir)
 			if err != nil {
 				return nil, err
 			}
@@ -698,7 +700,36 @@ func (s *Session) WriteCommandPackage(archive *compiler.Archive, pkgObj string) 
 	if err != nil {
 		return err
 	}
+
+	TrimDependencies(archive, deps)
+
 	return compiler.WriteProgramCode(deps, sourceMapFilter)
+}
+
+func TrimDependencies(root *compiler.Archive, deps []*compiler.Archive) {
+	sourceDependencies := map[string]struct{}{
+		``: struct{}{},
+	}
+	for _, d := range root.Declarations {
+		for _, dc := range d.DceDeps {
+			sourceDependencies[dc] = struct{}{}
+		}
+	}
+
+	for i := len(deps) - 1; i >= 0; i-- {
+		d := deps[i]
+		neededDecs := []*compiler.Decl{}
+		for _, dec := range d.Declarations {
+			_, ok := sourceDependencies[dec.FullName]
+			if ok {
+				neededDecs = append(neededDecs, dec)
+				for _, dc := range dec.DceDeps {
+					sourceDependencies[dc] = struct{}{}
+				}
+			}
+		}
+		d.Declarations = neededDecs
+	}
 }
 
 func NewMappingCallback(m *sourcemap.Map, goroot, gopath string, localMap bool) func(generatedLine, generatedColumn int, originalPos token.Position) {
